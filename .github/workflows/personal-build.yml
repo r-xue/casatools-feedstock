@@ -31,15 +31,11 @@ jobs:
         with:
           miniforge-version: latest
           activate-environment: build_env
+          conda-remove-defaults: true
 
       - name: Install build dependencies
         run: |
-          conda install conda-build anaconda-client conda-libmamba-solver conda-forge-pinning -c conda-forge -y
-          conda config --set solver libmamba
-
-      - name: Install build dependencies
-        run: |
-          # We no longer need conda-forge-pinning here, as we will use .ci_support/
+          # No need conda-forge-pinning here, as we will use .ci_support/
           conda install conda-build anaconda-client conda-libmamba-solver -c conda-forge -y
           conda config --set solver libmamba
 
@@ -67,3 +63,4 @@ jobs:
             PKG_FILE=$(conda build recipe/ -c https://conda.anaconda.org/rxue -c conda-forge -m "$config_file" --output)
             anaconda -t $ANACONDA_TOKEN upload -u rxue "$PKG_FILE" --force
           done
+          
