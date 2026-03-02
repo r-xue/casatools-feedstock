@@ -40,7 +40,7 @@ requirements:
     - {{ compiler("cxx") }}
   host:
     - {{ mpi }}
-    - casacore >=3.7 {{ mpi_prefix }}_*
+    - casacore 3.8.0 {{ mpi_prefix }}_*
     - casacpp {{ version }} {{ mpi_prefix }}_*
     - libgomp      # [linux]
     - libxml2-devel
