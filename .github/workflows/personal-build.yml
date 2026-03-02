@@ -61,9 +61,9 @@ jobs:
             echo "=========================================================="
             
             # Build the package using the explicit feedstock matrix config
-            conda build recipe/ -c conda-forge -m "$config_file"
+            conda build recipe/ -c https://conda.anaconda.org/rxue -c conda-forge -m "$config_file"
             
             # Identify the output file path and upload it immediately
-            PKG_FILE=$(conda build recipe/ -c conda-forge -m "$config_file" --output)
+            PKG_FILE=$(conda build recipe/ -c https://conda.anaconda.org/rxue -c conda-forge -m "$config_file" --output)
             anaconda -t $ANACONDA_TOKEN upload -u rxue "$PKG_FILE" --force
           done
