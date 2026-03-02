@@ -1,0 +1,50 @@
+name: Build and Upload Personal Package
+
+on:
+  push:
+    branches: [main, personel]
+    paths:
+      - "recipe/**"
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    # 1. Use the matrix variable to dynamically set the runner OS
+    runs-on: ${{ matrix.os }}
+
+    # 2. Define the matrix
+    strategy:
+      fail-fast: false # If one OS fails, let the other continue building
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Miniforge (Conda)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: build_env
+
+      - name: Install build dependencies
+        run: |
+          conda install conda-build anaconda-client conda-libmamba-solver conda-forge-pinning -c conda-forge -y
+          conda config --set solver libmamba
+
+      - name: Build the package
+        run: |
+          # 2. Tell conda build to use the conda-forge configuration file (-m)
+          conda build recipe/ -c conda-forge -m ${CONDA_PREFIX}/conda_build_config.yaml
+
+      - name: Upload to Anaconda Cloud
+        env:
+          ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
+        run: |
+          # 3. $(conda build --output recipe/) automatically finds the correct platform path
+          anaconda -t $ANACONDA_TOKEN upload -u rxue $(conda build --output recipe/) --force
