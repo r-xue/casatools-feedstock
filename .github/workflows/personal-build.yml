@@ -37,14 +37,33 @@ jobs:
           conda install conda-build anaconda-client conda-libmamba-solver conda-forge-pinning -c conda-forge -y
           conda config --set solver libmamba
 
-      - name: Build the package
+      - name: Install build dependencies
         run: |
-          # 2. Tell conda build to use the conda-forge configuration file (-m)
-          conda build recipe/ -c conda-forge -m ${CONDA_PREFIX}/conda_build_config.yaml
+          # We no longer need conda-forge-pinning here, as we will use .ci_support/
+          conda install conda-build anaconda-client conda-libmamba-solver -c conda-forge -y
+          conda config --set solver libmamba
 
-      - name: Upload to Anaconda Cloud
+      - name: Build and Upload
         env:
           ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
         run: |
-          # 3. $(conda build --output recipe/) automatically finds the correct platform path
-          anaconda -t $ANACONDA_TOKEN upload -u rxue $(conda build --output recipe/) --force
+          # 1. Determine the OS to select the right config files
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            CONFIG_PREFIX="osx_arm64_"
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            CONFIG_PREFIX="linux_64_"
+          fi
+
+          # 2. Loop through every configuration file for this specific OS
+          for config_file in .ci_support/${CONFIG_PREFIX}*.yaml; do
+            echo "=========================================================="
+            echo "Building with config: $config_file"
+            echo "=========================================================="
+            
+            # Build the package using the explicit feedstock matrix config
+            conda build recipe/ -c conda-forge -m "$config_file"
+            
+            # Identify the output file path and upload it immediately
+            PKG_FILE=$(conda build recipe/ -c conda-forge -m "$config_file" --output)
+            anaconda -t $ANACONDA_TOKEN upload -u rxue "$PKG_FILE" --force
+          done
