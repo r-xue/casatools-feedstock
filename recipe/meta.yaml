@@ -14,6 +14,8 @@ source:
   sha256: 5bcdfc745878fe1bb2ba57c6f6ecc587fb5a6da4371faeaa8b396560778590dc
   patches:
     - macos-not-gcc.patch  # [osx]
+    - expose-par-cubegridding.patch
+    - expose-par-fracbw-cas-14520.patch
 
 build:
   number: {{ build }}

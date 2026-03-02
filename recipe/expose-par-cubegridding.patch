@@ -1,0 +1,76 @@
+From 56d100200399c1a04e66a07d9f02ca84f4274e8a Mon Sep 17 00:00:00 2001
+From: Rui Xue <rx.astro@gmail.com>
+Date: Sun, 1 Mar 2026 04:57:02 -0600
+Subject: [PATCH] Add setcubegridding method to SynthesisImager and update XML
+ documentation
+
+---
+ .../synthesisimager/synthesisimager_cmpt.cc   | 19 ++++++++++++++++++
+ casatools/xml/synthesisimager.xml             | 20 +++++++++++++++++++
+ 2 files changed, 39 insertions(+)
+
+diff --git a/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc b/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
+index 76ce2a2a6d..5528771134 100644
+--- a/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
++++ b/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
+@@ -924,6 +924,25 @@ synthesisimager::done()
+   return rstat;
+ }
+ 
++bool
++synthesisimager::setcubegridding(bool cubegridding)
++{
++  Bool rstat(false);
++
++  try
++    {
++      itsImager = makeSI();
++      itsImager->setCubeGridding(cubegridding);
++      rstat = true;
++    }
++  catch  (AipsError x)
++    {
++      RETHROW(x);
++    }
++
++  return rstat;
++}
++
+ 
+   /* PRIVATE HELPER FUNCTIONS */
+ 
+diff --git a/casatools/xml/synthesisimager.xml b/casatools/xml/synthesisimager.xml
+index f253694306..a1a0b8b1f2 100644
+--- a/casatools/xml/synthesisimager.xml
++++ b/casatools/xml/synthesisimager.xml
+@@ -910,7 +910,27 @@ CORRECTED\_DATA and MODEL\_DATA columns
+ <returns type="bool"/>
+ </method>
+ 
++   <method name="setcubegridding" type="function">
++   <shortdescription>Enable or disable the cube gridding path</shortdescription>
+ 
++<description>
++Control whether executemajorcycle uses the CubeMajorCycleAlgorithm
++(parallel sub-cube) path.  When disabled, the standard runMajorCycle
++path is used instead.  Disabling cube gridding is necessary when the
++MeasurementSet uses the Adios2StMan storage manager because the
++sub-cube channel slicing triggers a SetSelection dimension mismatch
++in ADIOS2.
++</description>
++<input>
++
++     <param name="cubegridding" type="bool">
++     <description>Enable (True) or disable (False) cube gridding</description>
++     <value>true</value>
++     </param>
++
++</input>
++<returns type="bool"/>
++</method>
+ 
+ 
+ </tool>
+-- 
+2.43.0
+

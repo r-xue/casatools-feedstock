@@ -1,0 +1,53 @@
+From 023b4936bae9dfb8129263b0e0454e4f731af99d Mon Sep 17 00:00:00 2001
+From: Rui Xue <rx.astro@gmail.com>
+Date: Thu, 26 Feb 2026 22:02:49 -0600
+Subject: [PATCH] CAS-14520: Expose `fracbw` parameter in `setweighting` Python
+ binding from `casatools`
+
+---
+ casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc | 5 +++--
+ casatools/xml/synthesisimager.xml                           | 5 +++++
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc b/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
+index 888069e4d0..76ce2a2a6d 100644
+--- a/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
++++ b/casatools/src/tools/synthesisimager/synthesisimager_cmpt.cc
+@@ -462,7 +462,8 @@ bool synthesisimager::setweighting(const std::string& type,
+ 				   const long npixels,
+ 				   const bool multifield,
+ 				   const bool usecubebriggs,
+-				   const std::vector<std::string>& uvtaper
++				   const std::vector<std::string>& uvtaper,
++				   const double fracbw
+ 				   /*				   const std::string& filtertype,
+ 				   const ::casac::variant& filterbmaj,
+ 				   const ::casac::variant& filterbmin,
+@@ -490,7 +491,7 @@ bool synthesisimager::setweighting(const std::string& type,
+ 
+       if(uvtaperpars.nelements()>0 && uvtaperpars[0].length()>0) filtertype=String("gaussian");
+ 
+-      itsImager->weight( type, rmode, cnoise, robust, cfov, npixels, multifield, usecubebriggs, filtertype, bmaj, bmin, bpa  );
++      itsImager->weight( type, rmode, cnoise, robust, cfov, npixels, multifield, usecubebriggs, filtertype, bmaj, bmin, bpa, fracbw  );
+ 
+     } 
+   catch  (AipsError x) 
+diff --git a/casatools/xml/synthesisimager.xml b/casatools/xml/synthesisimager.xml
+index 380b67a6b6..f253694306 100644
+--- a/casatools/xml/synthesisimager.xml
++++ b/casatools/xml/synthesisimager.xml
+@@ -487,6 +487,11 @@ Define the image coordinate systems and shapes.
+      <value/>
+      </param>
+ 
++     <param name="fracbw" type="double">
++     <description>Fractional bandwidth for briggsbwtaper weighting (0=auto-compute from image cube)</description>
++     <value>0.0</value>
++     </param>
++
+ 
+ </input>
+ <returns type="bool"/>
+-- 
+2.43.0
+
