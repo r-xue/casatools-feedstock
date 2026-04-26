@@ -1,0 +1,384 @@
+diff --git a/casatasks/src/private/imagerhelpers/imager_base.py b/casatasks/src/private/imagerhelpers/imager_base.py
+index 99dfe8e0425d215134cab5f1cb01d711bca8f84c..8a6dd94af1e699da34c85d58fb5db95cfd3bdba9 100644
+--- a/casatasks/src/private/imagerhelpers/imager_base.py
++++ b/casatasks/src/private/imagerhelpers/imager_base.py
+@@ -536,13 +536,28 @@ class PySynthesisImager:
+     #############################################
+     def makePB(self):
+         ###for cube standard gridder pb is made in c++ with psf
+-        if not (
++        isCubeStandard = (
+             "stand" in self.allgridpars["0"]["gridder"]
+             and "cube" in self.allimpars["0"]["specmode"]
+-        ):
++        )
++        if not isCubeStandard:
+             self.makePBCore()
+-        for immod in range(0, self.NF):
+-            self.PStools[immod].normalizeprimarybeam()
++        # For cube+standard, PB normalization was already done per-subcube
++        # in CubeMajorCycleAlgorithm::task() during PSF making.  Skip the
++        # redundant full-cube normalizeprimarybeam() on the master which
++        # otherwise iterates over all (pol x chan) planes on disk.
++        import time
++        t0 = time.time()
++        if not isCubeStandard:
++            for immod in range(0, self.NF):
++                self.PStools[immod].normalizeprimarybeam()
++        t1 = time.time()
++        casalog.post(
++            "***Time for normalizeprimarybeam: %.2f sec (skipped=%s)"
++            % (t1 - t0, str(isCubeStandard)),
++            "INFO3",
++            "task_tclean",
++        )
+ 
+     #############################################
+     def makePBCore(self):
+diff --git a/casatasks/src/private/imagerhelpers/imager_return_dict.py b/casatasks/src/private/imagerhelpers/imager_return_dict.py
+index cae79ddd78f83406835de0d7004a87ca32dd4cba..f629d6174eaefd7b569cead1feb5696f9840de01 100644
+--- a/casatasks/src/private/imagerhelpers/imager_return_dict.py
++++ b/casatasks/src/private/imagerhelpers/imager_return_dict.py
+@@ -662,7 +662,7 @@ class ImagingDict():
+         return nstokes, nfreq, stokes_axis, freq_axis
+ 
+ 
+-    def fill_summary_minor(self, channo, stokes, stokes_axis, freq_axis, fullsummary):
++    def fill_summary_minor(self, channo, stokes, stokes_axis, freq_axis, fullsummary, ia_resid=None, ia_mask=None, ia_model=None):
+         """
+         Given the input image name, and the corresponding field, channel number, and
+         Stokes plane, extract the relevant information from the image to generate a
+@@ -675,18 +675,23 @@ class ImagingDict():
+         stokes_axis     The axis to index for Stokes, int
+         freq_axis       The axis to index for frequency, int
+         fullsummary     Construct a full summary, or only a subset, bool
++        ia_resid        (Optional) pre-opened residual image tool
++        ia_mask         (Optional) pre-opened mask image tool
++        ia_model        (Optional) pre-opened model image tool
+ 
+         Returns:
+         summaryparams     Dict containing the necessary (key:value) pairs
+         """
+ 
+-        ia = image()
++        if ia_resid is None:
++            if not os.path.exists(self.residname):
++                raise FileNotFoundError(f'Residual image {self.residname} does not exist.')
++            ia_r = image()
++            ia_r.open(self.residname)
++        else:
++            ia_r = ia_resid
+ 
+-        if not os.path.exists(self.residname):
+-            raise FileNotFoundError(f'Residual image {self.residname} does not exist.')
+-
+-        ia.open(self.residname)
+-        shape = ia.shape()
++        shape = ia_r.shape()
+ 
+         if stokes_axis == 2 and freq_axis == 3:
+             blc = [0, 0, stokes, channo]
+@@ -695,24 +700,40 @@ class ImagingDict():
+             blc = [0, 0, channo, stokes]
+             trc = [shape[0], shape[1], channo, stokes]
+ 
+-        data = ia.getchunk(blc, trc, dropdeg=True)
+-        ia.close()
++        data = ia_r.getchunk(blc, trc, dropdeg=True)
++        
++        if ia_resid is None:
++            ia_r.close()
+ 
+         # Get the mask if it exists
+         if len(self.maskname) > 0 and os.path.exists(self.maskname):
+-            ia.open(self.maskname)
+-            mask = ia.getchunk(blc, trc, dropdeg=True)
+-            ia.close()
++            if ia_mask is None:
++                ia_m = image()
++                ia_m.open(self.maskname)
++            else:
++                ia_m = ia_mask
++                
++            mask = ia_m.getchunk(blc, trc, dropdeg=True)
++            
++            if ia_mask is None:
++                ia_m.close()
+         else:
+             mask = [] # No mask, so everything is unmasked
+ 
+         # If model image exists, calc model flux, else set to 0
+         model_sum = 0
+         if os.path.exists(self.modelname):
+-            ia.open(self.modelname)
+-            model_data = ia.getchunk(blc, trc, dropdeg=True)
++            if ia_model is None:
++                ia_mod = image()
++                ia_mod.open(self.modelname)
++            else:
++                ia_mod = ia_model
++                
++            model_data = ia_mod.getchunk(blc, trc, dropdeg=True)
+             model_sum = np.sum(model_data)
+-            ia.close()
++            
++            if ia_model is None:
++                ia_mod.close()
+ 
+         if len(mask) == 0:
+             peak_resid = np.amax(data)
+@@ -785,6 +806,10 @@ class ImagingDict():
+ 
+         for ff in range(nfields):
+             self.residname=impars[str(ff)]['imagename']+'.residual.tt0' if(os.path.exists(impars[str(ff)]['imagename']+'.residual.tt0')) else impars[str(ff)]['imagename']+'.residual'
++            
++            if not os.path.exists(self.residname):
++                continue
++
+             self.modelname=impars[str(ff)]['imagename']+'.model.tt0' if(os.path.exists(impars[str(ff)]['imagename']+'.model.tt0')) else impars[str(ff)]['imagename']+'.model'
+             if(os.path.exists(impars[str(ff)]['imagename']+'.mask')):
+                 self.maskname=impars[str(ff)]['imagename']+'.mask'
+@@ -803,6 +828,20 @@ class ImagingDict():
+             fullsummary = decpars[str(ff)]['fullsummary']
+             nstokes, nfreq, stokes_axis, freq_axis = self.image_dimensions()
+ 
++            # Cache the image tools to avoid repeatedly opening/closing images across loops
++            ia_resid = image()
++            ia_resid.open(self.residname)
++
++            ia_mask = None
++            if len(self.maskname) > 0 and os.path.exists(self.maskname):
++                ia_mask = image()
++                ia_mask.open(self.maskname)
++
++            ia_model = None
++            if os.path.exists(self.modelname):
++                ia_model = image()
++                ia_model.open(self.modelname)
++
+             if ff not in self._returndict['summaryminor']:
+                 self._returndict['summaryminor'][ff] = dict()
+ 
+@@ -814,7 +853,13 @@ class ImagingDict():
+                     if ss not in self._returndict['summaryminor'][ff][cc]:
+                         self._returndict['summaryminor'][ff][cc][ss] = dict()
+ 
+-                    self._returndict['summaryminor'][ff][cc][ss] = self.fill_summary_minor(cc, ss, stokes_axis, freq_axis, fullsummary)
++                    self._returndict['summaryminor'][ff][cc][ss] = self.fill_summary_minor(cc, ss, stokes_axis, freq_axis, fullsummary, ia_resid, ia_mask, ia_model)
++
++            ia_resid.close()
++            if ia_mask is not None:
++                ia_mask.close()
++            if ia_model is not None:
++                ia_model.close()
+ 
+ 
+     def construct_residual_dict(self, paramList):
+diff --git a/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.cc b/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.cc
+index d6535ea12acd22b668ab7d0e39273e3b58f1bc34..6936097539968b8ba90faba20d670f58ae2a5fd7 100644
+--- a/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.cc
++++ b/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.cc
+@@ -1029,6 +1029,24 @@ itsTooLongForFname = false;
+     //      
+     // create a working copy of residual image (including pixel masks) 
+     os << LogIO::NORMAL2 <<"algorithm:"<<alg<<LogIO::POST;
++
++    // Compute per-image budget for autoMaskByMultiThreshold so that disk-spill
++    // triggers when simultaneous allocations would exceed the configured limit.
++    // Gridding footprint is estimated with the standard GridFT fudge factor of 8;
++    // N_CONCURRENT_AMT is the empirically measured peak concurrency (~14 planes).
++    IPosition amtImShape = imstore->residual()->shape();
++    Double amtPlaneMB = Double(amtImShape(0)) * Double(amtImShape(1)) * sizeof(Float)
++                        / (1024.0 * 1024.0);
++    Double amtConfiguredMB = AppRC::getMemoryAvailable() / 1e6;
++    Double amtGriddingMB   = 8.0 * amtPlaneMB * Double(amtImShape(2)) * Double(amtImShape(3));
++    Double amtRemainingMB  = amtConfiguredMB - amtGriddingMB;
++    const Double N_CONCURRENT_AMT = 14.0;
++    Double perImageBudgetMB = (amtRemainingMB > 0.0 ? amtRemainingMB : amtConfiguredMB)
++                              / N_CONCURRENT_AMT;
++    os << LogIO::NORMAL << "auto-multithresh per-image memory budget: " << perImageBudgetMB
++       << " MB (configured=" << amtConfiguredMB << " MB, gridding est="
++       << amtGriddingMB << " MB)" << LogIO::POST;
++
+     TempImage<Float>* tempres = new TempImage<Float>(imstore->residual()->shape(), imstore->residual()->coordinates(), memoryToUse()); 
+     //Array<Float> maskdata;
+     //Array<Float> psfdata;
+@@ -1263,7 +1281,7 @@ itsTooLongForFname = false;
+       autoMaskByThreshold2(*tempmask, *tempres, *imstore->psf(), qreso, resbybeam, qthresh, fracofpeak, thestats, sigma, nmask);
+     }
+     else if (alg==String("multithresh")) {
+-      autoMaskByMultiThreshold(*tempmask, posmask, *tempres, *imstore->psf(), thestats, thenewstats, iterdone, chanflag, minpercentchange, itsSidelobeLevel, sidelobethreshold, noisethreshold, lownoisethreshold, negativethreshold, cutthreshold, smoothfactor, minbeamfrac, growiterations, dogrowprune, verbose, isthresholdreached);
++      autoMaskByMultiThreshold(*tempmask, posmask, *tempres, *imstore->psf(), thestats, thenewstats, iterdone, chanflag, minpercentchange, itsSidelobeLevel, sidelobethreshold, noisethreshold, lownoisethreshold, negativethreshold, cutthreshold, smoothfactor, minbeamfrac, growiterations, dogrowprune, verbose, isthresholdreached, perImageBudgetMB);
+     }
+ 
+     // this did not work (it won't physically remove the mask from the image 
+@@ -2223,9 +2241,12 @@ itsTooLongForFname = false;
+                                           const Int growIterations,
+                                           const Bool doGrowPrune,
+                                           const Bool verbose,
+-                                          const Bool isthresholdreached)
++                                          const Bool isthresholdreached,
++                                          Double perImageBudgetMB)
+   {
+     LogIO os( LogOrigin("SDMaskHandler","autoMaskByMultiThreshold",WHERE) );
++    // Use caller-supplied per-image budget when available; fall back to memoryToUse().
++    Double budgetMB = (perImageBudgetMB > 0.0) ? perImageBudgetMB : memoryToUse();
+     Array<Double> rmss, maxs, mins, mads, mdns;
+     Array<Double> resRmss;
+     IPosition minrmspos, maxrmspos, minmaxpos, maxmaxpos, minmadpos, maxmadpos;
+@@ -2254,17 +2275,9 @@ itsTooLongForFname = false;
+       tempcurinmask.copyData(mask);
+     }
+       
+-    // tempmsk: working image for the curret mask
+-    TempImage<Float> tempmask(mask.shape(), mask.coordinates(), memoryToUse());
+-    tempmask.set(0);
+-    // prevmask: mask from previous iter.
+-    TempImage<Float> prevmask(mask.shape(), mask.coordinates(), memoryToUse());
+-    // use positive only previous mask
+-    //prevmask.copyData(LatticeExpr<Float>(mask) );
+-    prevmask.copyData(LatticeExpr<Float>(posmask) );
+     // set up a container for a full cube negative mask
+     //if (negativeThresholdFactor > 0) {
+-    TempImage<Float> thenegmask(mask.shape(), mask.coordinates(), memoryToUse());
++    TempImage<Float> thenegmask(mask.shape(), mask.coordinates(), budgetMB);
+     thenegmask.set(0);  
+     //}
+     // taking account for beam or input resolution
+@@ -2498,12 +2511,12 @@ itsTooLongForFname = false;
+             Slicer sl(start, length);
+             AxesSpecifier aspec(True); // keep degenerate axes
+             SubImage<Float> planeResImage(res, sl, aspec, true);    
+-            TempImage<Float> planeTempMask(planeResImage.shape(), planeResImage.coordinates(), memoryToUse());
++            TempImage<Float> planeTempMask(planeResImage.shape(), planeResImage.coordinates(), budgetMB);
+             planeTempMask.set(0); // initialize
+             //SubImage<Float> subprevmask(prevmask, sl, true, aspec, true);
+             // working copy of per-plane previous total mask to be modified. Started with en empty mask. 
+             // For an un-touched version of per-plane previous mask, subMask is created at the grow mask step.
+-            TempImage<Float> subprevmask(planeshp, planeResImage.coordinates(), memoryToUse());
++            TempImage<Float> subprevmask(planeshp, planeResImage.coordinates(), budgetMB);
+             subprevmask.set(0);
+             SubImage<Float> subposmask(posmask, sl, true, aspec, true);
+             //Vector<Bool> allPruned(nchan);
+@@ -2526,7 +2539,7 @@ itsTooLongForFname = false;
+               // make temp mask image consist of the original pix value and below the threshold is set to 0 
+               //TempImage<Float> maskedRes(res.shape(), res.coordinates(), memoryToUse());
+               // single plane
+-              TempImage<Float> maskedRes(planeshp, planeResImage.coordinates(), memoryToUse());
++              TempImage<Float> maskedRes(planeshp, planeResImage.coordinates(), budgetMB);
+               maskedRes.set(0);
+               //makeMaskByPerChanThreshold(res, chanFlag, maskedRes, maskThreshold, dummysizes); 
+               makeMaskByPerChanThreshold(planeResImage, chanFlag1elem, maskedRes, maskThreshold1elem, dummysizes); 
+@@ -2641,7 +2654,7 @@ itsTooLongForFname = false;
+           
+             //TempImage<Float> thenewmask(res.shape(),res.coordinates(), memoryToUse());
+             //thenewmask.set(0);
+-            TempImage<Float> thenewmask(planeshp,planeResImage.coordinates(), memoryToUse());
++            TempImage<Float> thenewmask(planeshp,planeResImage.coordinates(), budgetMB);
+             thenewmask.set(0);
+             //makeMaskByPerChanThreshold(*outmask, chanFlag, thenewmask, cutThresholdValue, dummysizes); 
+             makeMaskByPerChanThreshold(*outmask, chanFlag1elem, thenewmask, cutThresholdValue, dummysizes); 
+@@ -2710,7 +2723,7 @@ itsTooLongForFname = false;
+               // corresponds to calcThresholdMask with lowNoiseThreshold...
+               //TempImage<Float> constraintMaskImage(res.shape(), res.coordinates(), memoryToUse()); 
+               // per-plane constraint mask image
+-              TempImage<Float> constraintMaskImage(planeshp, planeResImage.coordinates(), memoryToUse()); 
++              TempImage<Float> constraintMaskImage(planeshp, planeResImage.coordinates(), budgetMB); 
+               constraintMaskImage.set(0);
+               // constrainMask is 1/0 mask
+               //makeMaskByPerChanThreshold(res, chanFlag, constraintMaskImage, lowMaskThreshold, dummysizes);
+@@ -2741,7 +2754,7 @@ itsTooLongForFname = false;
+               // does opposite T/F interpretation NEED to CHANGE)
+               //TempImage<Bool> constraintMask(res.shape(),res.coordinates(), memoryToUse());
+               //constraintMask.copyData( LatticeExpr<Bool> (iif(constraintMaskImage > 0, true, false)) );
+-              TempImage<Bool> constraintMask(planeshp, planeResImage.coordinates(), memoryToUse());
++              TempImage<Bool> constraintMask(planeshp, planeResImage.coordinates(), budgetMB);
+               constraintMask.copyData( LatticeExpr<Bool> (iif(constraintMaskImage > 0, true, false)) );
+               // simple structure element for binary dilation
+               IPosition axislen(2, 3, 3);
+@@ -2880,7 +2893,7 @@ itsTooLongForFname = false;
+ 
+             // **** NEGATIVE MASK creation *****
+             //TempImage<Float> thenegmask(res.shape(),res.coordinates(), memoryToUse());
+-            TempImage<Float> subnegmask(planeshp, planeResImage.coordinates(), memoryToUse());
++            TempImage<Float> subnegmask(planeshp, planeResImage.coordinates(), budgetMB);
+             subnegmask.set(0);
+             //Vector<Float> negmaskpixs;
+             Vector<Float> negmaskpixs1elem;
+@@ -2889,7 +2902,7 @@ itsTooLongForFname = false;
+               timer.mark();
+               //os<<LogIO::NORMAL<<"Creating a mask for negative features. "<<LogIO::POST;
+               //TempImage<Float> negativeMaskImage(res.shape(), res.coordinates(), memoryToUse()); 
+-              TempImage<Float> negativeSubMaskImage(planeshp, planeResImage.coordinates(), memoryToUse()); 
++              TempImage<Float> negativeSubMaskImage(planeshp, planeResImage.coordinates(), budgetMB); 
+               negativeSubMaskImage.set(0);
+               //makeMaskByPerChanThreshold(res, chanFlag, negativeMaskImage , negativeMaskThreshold, dummysizes);
+               makeMaskByPerChanThreshold(planeResImage, chanFlag1elem, negativeSubMaskImage, negativeMaskThreshold1elem, dummysizes);
+@@ -3008,7 +3021,7 @@ itsTooLongForFname = false;
+ 
+     }
+     // make a copy of unmodified previous mask 
+-    TempImage<Float> unmodifiedprevmask(res.shape(),res.coordinates(), memoryToUse());
++    TempImage<Float> unmodifiedprevmask(res.shape(),res.coordinates(), budgetMB);
+     unmodifiedprevmask.copyData(mask);
+      
+     if (res.hasPixelMask()) {
+diff --git a/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.h b/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.h
+index 59d3a542153e3663c0787892874dd266eba6516b..f93b98bf52294116c143fa702dc2bd46f38ac3f1 100644
+--- a/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.h
++++ b/casatools/src/code/synthesis/ImagerObjects/SDMaskHandler.h
+@@ -36,6 +36,7 @@
+ #include <casacore/images/Images/TempImage.h>
+ #include <casacore/casa/Logging/LogMessage.h>
+ #include <casacore/casa/Logging/LogSink.h>
++#include <synthesis/Utilities/AppRC.h>
+ 
+ #include<synthesis/ImagerObjects/SIImageStore.h>
+ #include<synthesis/ImagerObjects/SIImageStoreMultiTerm.h>
+@@ -202,7 +203,8 @@ public:
+                                           const casacore::Int growIterations=100,
+                                           const casacore::Bool dogrowprune=true,
+                                           const casacore::Bool verbose=false,
+-                                          const casacore::Bool isthresholdreached=false);
++                                          const casacore::Bool isthresholdreached=false,
++                                          casacore::Double perImageBudgetMB=-1.0);
+                            
+ 
+   std::shared_ptr<casacore::ImageInterface<float> > makeMaskFromBinnedImage (
+@@ -379,7 +381,11 @@ public:
+                                     const casacore::ImageInterface<casacore::Float>& outImage);
+   static casacore::Bool cloneImShape(const casacore::ImageInterface<casacore::Float>& inImage, const casacore::String& outImageName);
+   // max MB of memory to use in TempImage
+-  static inline casacore::Double memoryToUse() {return -1.0;};
++  // Respects system.resources.memory (casarc), system.resources.memfrac, and
++  // CASA_MAX_MEMORY env var via AppRC::getMemoryAvailable() (returns bytes).
++  static casacore::Double memoryToUse() {
++    return AppRC::getMemoryAvailable() / 1e6;
++  };
+ 
+   // Calculate statistics on a residual image with additional region and LEL mask specifications
+   // using classical method
+diff --git a/casatools/src/code/synthesis/ImagerObjects/SIImageStore.cc b/casatools/src/code/synthesis/ImagerObjects/SIImageStore.cc
+index d065f4d370a9b54f38508b49a1f79d7d6a986728..f88a763ce1cbeb05331eac63f15ff850097d6af0 100644
+--- a/casatools/src/code/synthesis/ImagerObjects/SIImageStore.cc
++++ b/casatools/src/code/synthesis/ImagerObjects/SIImageStore.cc
+@@ -2152,9 +2152,10 @@ void SIImageStore::setWeightDensity( std::shared_ptr<SIImageStore> imagetoset )
+     //    cout << "makeImBeamSet : imshape : " << itsImageShape << endl;
+ 
+     String blankpsfs="";
++    { // Explicit scope: acquire Read lock once, release before Write lock below
++    LatticeLocker lock2 (*(psf()), FileLocker::Read);
+     for( uInt chanid=0; chanid<nchan;chanid++) {
+       for( uInt polid=0; polid<npol; polid++ ) {
+-    LatticeLocker lock2 (*(psf()), FileLocker::Read);
+ 
+ 	IPosition substart(4,0,0,polid,chanid);
+ 	IPosition substop(4,nx-1,ny-1,polid,chanid);
+@@ -2189,6 +2190,7 @@ void SIImageStore::setWeightDensity( std::shared_ptr<SIImageStore> imagetoset )
+ 
+       }// end of pol loop
+     }// end of chan loop
++    } // end of Read lock scope
+ 
+     if( blankpsfs.length() >0 )
+       os << LogIO::WARN << "PSF is blank for" << blankpsfs << LogIO::POST;

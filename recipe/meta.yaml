@@ -16,6 +16,7 @@ source:
     - macos-not-gcc.patch  # [osx]
     - expose-par-cubegridding.patch
     - expose-par-fracbw-cas-14520.patch
+    - cas-14761.patch
 
 build:
   number: {{ build }}
