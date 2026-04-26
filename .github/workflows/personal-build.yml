@@ -16,7 +16,13 @@ jobs:
     strategy:
       fail-fast: false # If one OS fails, let the other continue building
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            config_prefix: linux_64_
+          - os: ubuntu-24.04-arm
+            config_prefix: linux_aarch64_
+          - os: macos-latest
+            config_prefix: osx_arm64_
 
     defaults:
       run:
@@ -43,15 +49,8 @@ jobs:
         env:
           ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
         run: |
-          # 1. Determine the OS to select the right config files
-          if [ "$RUNNER_OS" == "macOS" ]; then
-            CONFIG_PREFIX="osx_arm64_"
-          elif [ "$RUNNER_OS" == "Linux" ]; then
-            CONFIG_PREFIX="linux_64_"
-          fi
-
-          # 2. Loop through every configuration file for this specific OS
-          for config_file in .ci_support/${CONFIG_PREFIX}*.yaml; do
+          # 1. Loop through every configuration file for this specific OS
+          for config_file in .ci_support/${{ matrix.config_prefix }}*.yaml; do
             echo "=========================================================="
             echo "Building with config: $config_file"
             echo "=========================================================="
